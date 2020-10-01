@@ -1,0 +1,6 @@
+.vscode/
+old/
+tutorial/
+.env
+client_id.json
+token.pickle
