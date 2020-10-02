@@ -442,7 +442,7 @@ def get_next_event_from_user(calendar_id, appt_email):
 
 
 def create_event(
-        calendar_id, dog_name, email, notes, start_time, service_type):
+        calendar_id, dog_name, email, start_time, service_type):
     """
         Creates an event on the calendar.
         Parameters:
@@ -458,7 +458,7 @@ def create_event(
     summary = "{}'s appointment".format(dog_name)
     location = "Pet Bath and Beyond, 905 Kranzel Dr, Camp Hill, PA 17011, USA"
 
-    duration, type_description = get_details_from_sevice_type(type)
+    duration, type_description = get_details_from_sevice_type(service_type)
 
     end_time = start_time + timedelta(minutes=duration)
 
