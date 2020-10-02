@@ -4,3 +4,4 @@ tutorial/
 .env
 client_id.json
 token.pickle
+notes.txt
