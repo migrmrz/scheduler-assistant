@@ -34,30 +34,26 @@ def book_appt():
 
     appt_type = int(answers['appt_type']['answer'])
 
-    duration = get_details_from_sevice_type(appt_type)[0]
+    available_event_id = check_availability(
+        calendar_id, start_time_obj, appt_type)
 
-    if check_availability(calendar_id, start_time_obj, duration):
+    if available_event_id:
         response = {
-            "actions": [
-                {
+            "actions": [{
                     "redirect": "task://complete_booking"
                 },
                 {
                     "remember": {
-                        "appt_type": appt_type,
-                        "appt_time": appt_time,
-                        "appt_date": appt_date,
+                        "appt_id": available_event_id
                     }
                 }
             ]
         }
     else:
         response = {
-            "actions": [
-                {
-                    "redirect": "task://notify_no_availability"
-                }
-            ]
+            "actions": [{
+                "redirect": "task://notify_no_availability"
+            }]
         }
 
     return jsonify(response)
@@ -76,29 +72,20 @@ def complete_booking():
 
     appt_dog_name = answers['appt_dog_name']['answer']
     appt_email = answers['appt_email']['answer']
-    appt_type = memory['appt_type']
-    appt_time = memory['appt_time']
-    appt_date = memory['appt_date']
+    event_id = memory['appt_id']
 
-    start_time_str = appt_date + ' ' + appt_time
-    start_time_obj = datetime.strptime(start_time_str, '%Y-%m-%d %H:%M')
-    tzinfo = tz.gettz(os.environ.get("LOCAL_TIMEZONE"))
-    start_time_obj = start_time_obj.replace(tzinfo=tzinfo)
-
-    create_event(
-        calendar_id,
-        appt_dog_name,
-        appt_email,
-        start_time_obj,
-        appt_type
-    )
+    update_event(
+        event_id=event_id,
+        calendar_id=calendar_id,
+        dog_name=appt_dog_name,
+        start_time='',
+        service_type='',
+        email=appt_email)
 
     response = {
-        "actions": [
-            {
-                "redirect": "task://confirm_booking"
-            }
-        ]
+        "actions": [{
+            "redirect": "task://confirm_booking"
+        }]
     }
 
     return jsonify(response)
@@ -191,13 +178,13 @@ def change_appt():
 
     if memory['change_appt'] == "in_progress":
 
-        if 'change_appt' in memory['twilio']['collected_data']:
-            # list_appointment has been executed before and new appt data has
-            # been collected
+        if 'collected_data' in memory['twilio'] and \
+                'change_appt' in memory['twilio']['collected_data']:
+            # list_appointment hasn't been executed before and new appt data
+            # has been collected
             answers = memory[
                 'twilio']['collected_data']['change_appt']['answers']
             event_id = memory['appt_event_id']
-            appt_email = memory['appt_email']
 
             appt_time = answers['appt_time']['answer']
             appt_date = answers['appt_date']['answer']
@@ -210,12 +197,16 @@ def change_appt():
             start_time_obj = start_time_obj.replace(tzinfo=tzinfo)
 
             update_event(
-                event_id, calendar_id, start_time_obj, appt_type
+                event_id=event_id,
+                calendar_id=calendar_id,
+                dog_name='',
+                start_time=start_time_obj,
+                service_type=appt_type,
+                email=''
             )
 
             response = {
-                "actions": [
-                    {
+                "actions": [{
                         "remember": {
                             "appt_event_id": event_id,
                             "change_appt": "done"
@@ -228,20 +219,16 @@ def change_appt():
             }
         elif 'appt_event_id' in memory:
             response = {
-                "actions": [
-                    {
-                        "redirect": "task://complete_change"
-                    }
-                ]
+                "actions": [{
+                    "redirect": "task://complete_change"
+                }]
             }
         else:
             # Events haven't been listed before
             response = {
-                "actions": [
-                    {
-                        "redirect": "task://lookup_for_change"
-                    }
-                ]
+                "actions": [{
+                    "redirect": "task://lookup_for_change"
+                }]
             }
 
     elif memory['change_appt'] == "list_needed":
@@ -251,17 +238,14 @@ def change_appt():
         print(next_event)
         if next_event is None:
             response = {
-                "actions": [
-                    {
-                        "redirect": "task://notify_no_event_found"
-                    }
-                ]
+                "actions": [{
+                    "redirect": "task://notify_no_event_found"
+                }]
             }
         else:
             event_id = next_event['id']
             response = {
-                "actions": [
-                    {
+                "actions": [{
                         "remember": {
                             "appt_event_id": event_id,
                             "change_appt": "in_progress"
@@ -376,16 +360,17 @@ def create_service():
     return service
 
 
-def check_availability(calendar_id, start_time, duration):
+def check_availability(calendar_id, start_time, service_type):
     """
         Checks if there is an event already created at the specific date and
-        time provided. Returns True if the spot is available.
+        time provided and creates a temporary one to reserve the spot.
         Parameters:
             - calendar_id
             - start_time
-            - duration
-        Returns: boolean. True if the spot is available.
+            - service_type
+        Returns: id of the created event or None if the spot is not available.
     """
+    duration, type_description = get_details_from_sevice_type(service_type)
     time_min = start_time.astimezone(tz.tzutc()).isoformat()
     time_max = (start_time + timedelta(minutes=duration)) \
         .astimezone(tz.tzutc()).isoformat()
@@ -398,7 +383,15 @@ def check_availability(calendar_id, start_time, duration):
         timeMax=time_max
     ).execute()
 
-    return True if events_result['items'] == [] else False
+    event_id = None
+
+    if events_result['items'] == []:
+        # Creates a draft event to reserve the spot after checking availability
+        event = create_event(
+            calendar_id, start_time, duration, type_description)
+        event_id = event['id']
+
+    return event_id
 
 
 def get_next_event_from_user(calendar_id, appt_email):
@@ -441,29 +434,21 @@ def get_next_event_from_user(calendar_id, appt_email):
     return event_result
 
 
-def create_event(
-        calendar_id, dog_name, email, start_time, service_type):
+def create_event(calendar_id, start_time, duration, type_description):
     """
         Creates an event on the calendar.
         Parameters:
-            - name of the dog(s) for the appointment
-            - email of the attendee for email confirmation
-            - notes. Any particular details that want to be noted
+            - calendar_id
             - start_time in datetime.datetime format
-            - service_type which also determines the appointment duration in
-            minutes for the end_time calculation
+            - duration of the appointment that will be used to calculate the
+            end time of the event
+            - type_description
         Returns: Event structure as confirmation
     """
-
-    summary = "{}'s appointment".format(dog_name)
     location = "Pet Bath and Beyond, 905 Kranzel Dr, Camp Hill, PA 17011, USA"
-
-    duration, type_description = get_details_from_sevice_type(service_type)
-
     end_time = start_time + timedelta(minutes=duration)
 
     event = {
-        'summary': summary,
         'location': location,
         'description': type_description,
         'start': {
@@ -473,19 +458,8 @@ def create_event(
         'end': {
             'dateTime': end_time.strftime("%Y-%m-%dT%H:%M:%S"),
             'timeZone': os.environ.get("LOCAL_TIMEZONE")
-        },
-        'attendees': [
-            {'email': email},
-        ],
-        'reminders': {
-            'useDefault': False,
-            'overrides': [
-                {'method': 'popup', 'minutes': 10}
-            ],
-        },
+        }
     }
-
-    calendar_id = os.environ.get("GOOGLE_CALENDAR_ID")
 
     service = create_service()
 
@@ -498,7 +472,8 @@ def create_event(
     return create_event
 
 
-def update_event(event_id, calendar_id, start_time, type):
+def update_event(
+        event_id, calendar_id, dog_name, start_time, service_type, email):
     """
         Updates event.
         Parameters:
@@ -508,30 +483,37 @@ def update_event(event_id, calendar_id, start_time, type):
             - end_time in a datetime.datetime format
         Returns: Event structure as confirmation
     """
+    summary = "{}'s appointment".format(dog_name)
 
-    if type == 1:
-        duration = 90
-        type_description = "Bath"
-    elif type == 2:
-        duration = 150
-        type_description = "Bath with haircut"
-    elif type == 3:
-        duration = 120
-        type_description = "Bath with brush"
-
-    end_time = start_time + timedelta(minutes=duration)
-
-    body = {
-        'description': type_description,
-        'start': {
-            'dateTime': start_time.strftime("%Y-%m-%dT%H:%M:%S"),
-            'timeZone': os.environ.get("LOCAL_TIMEZONE")
-        },
-        'end': {
-            'dateTime': end_time.strftime("%Y-%m-%dT%H:%M:%S"),
-            'timeZone': os.environ.get("LOCAL_TIMEZONE")
+    if start_time == '' and service_type == '':
+        # It is a confirmation update that doesn't need to change time and type
+        body = {
+            'summary': summary,
+            'attendees': [
+                {'email': email},
+            ],
+            'reminders': {
+                'useDefault': False,
+                'overrides': [
+                    {'method': 'popup', 'minutes': 30}
+                ],
+            }
         }
-    }
+    else:
+        # It is a modification of event requested by the user
+        duration, type_description = get_details_from_sevice_type(service_type)
+        end_time = start_time + timedelta(minutes=duration)
+        body = {
+            'description': type_description,
+            'start': {
+                'dateTime': start_time.strftime("%Y-%m-%dT%H:%M:%S"),
+                'timeZone': os.environ.get("LOCAL_TIMEZONE")
+            },
+            'end': {
+                'dateTime': end_time.strftime("%Y-%m-%dT%H:%M:%S"),
+                'timeZone': os.environ.get("LOCAL_TIMEZONE")
+            }
+        }
 
     service = create_service()
 
