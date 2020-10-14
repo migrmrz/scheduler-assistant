@@ -2,6 +2,6 @@
 old/
 tutorial/
 .env
-client_id.json
+credentials.json
 token.pickle
 notes.txt
