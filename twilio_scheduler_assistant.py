@@ -417,7 +417,7 @@ def get_next_event_from_user(calendar_id, appt_email):
             - calendarId
             - email
         Returns: Dict structure with the nearest event in case one is found.
-        None is no event was found
+        None if no event was found
     """
 
     time_min = datetime.now(timezone.utc).isoformat()
