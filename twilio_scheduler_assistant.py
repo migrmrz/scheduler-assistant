@@ -93,14 +93,7 @@ def complete_booking():
         # user started a booking process
         response = {
             "actions": [{
-                "say": "I'm sorry. The time limit to confirm the reservation "
-                "has been exceeded. Please try again."
-            }, {
-                "remember": {
-                    "appt_id": ""
-                }
-            }, {
-                "redirect": "task://book_appointments"
+                "redirect": "task://confirmation_time_limit_exceeded"
             }]
         }
     else:
