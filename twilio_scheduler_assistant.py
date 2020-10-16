@@ -21,6 +21,12 @@ def book_appt():
     memory = json.loads(request.form.get('Memory'))
     calendar_id = os.environ.get("GOOGLE_CALENDAR_ID")
 
+    if 'appt_id' in memory and memory['appt_id'] != "":
+        # User left an unfinished booking in the conversation due to an error
+        cancel_event(calendar_id, memory['appt_id'])
+    # Delete draft events that have more than 5 minutes of being created
+    delete_draft_events(calendar_id)
+
     answers = memory[
         'twilio']['collected_data']['book_appt']['answers']
 
@@ -74,7 +80,7 @@ def complete_booking():
     appt_email = answers['appt_email']['answer']
     event_id = memory['appt_id']
 
-    update_event(
+    event = update_event(
         event_id=event_id,
         calendar_id=calendar_id,
         dog_name=appt_dog_name,
@@ -82,11 +88,27 @@ def complete_booking():
         service_type='',
         email=appt_email)
 
-    response = {
-        "actions": [{
-            "redirect": "task://confirm_booking"
-        }]
-    }
+    if event['status'] == 'cancelled':
+        # Cancelled due to time limit exceeded during reservation and another
+        # user started a booking process
+        response = {
+            "actions": [{
+                "say": "I'm sorry. The time limit to confirm the reservation "
+                "has been exceeded. Please try again."
+            }, {
+                "remember": {
+                    "appt_id": ""
+                }
+            }, {
+                "redirect": "task://book_appointments"
+            }]
+        }
+    else:
+        response = {
+            "actions": [{
+                "redirect": "task://confirm_booking"
+            }]
+        }
 
     return jsonify(response)
 
@@ -396,8 +418,8 @@ def check_availability(calendar_id, start_time, service_type):
 
 def get_next_event_from_user(calendar_id, appt_email):
     """
-        Returns a list of all the events on a specific calendar from the
-        next 30 days.
+        Returns a list of all the events on a specific calendar in the next 30
+        days.
         Parameters:
             - calendarId
             - email
@@ -527,16 +549,18 @@ def update_event(
     return update_event
 
 
-def cancel_event(calendar_id, event_id):
+def cancel_event(calendar_id, event_id, service=None):
     """
         Deletes an event from the calendar. Appointment cancellation.
         Parameters:
             - event_id
             - calendar_id
+            - service
         Returns: boolean. True if service was cancelled correctly or False if
         there was an error.
     """
-    service = create_service()
+    if not service:
+        service = create_service()
 
     try:
         service.events().delete(calendarId=calendar_id, eventId=event_id)\
@@ -546,6 +570,41 @@ def cancel_event(calendar_id, event_id):
         return False
     else:
         return True
+
+
+def delete_draft_events(calendar_id):
+    """
+        Deletes events with no email assigned in a period of 60 days and has
+        been more than 5 minutes of being created. This means that:
+            - A user started a booking process, the spot was reserved but 
+            ended the conversation halfway through (fallback action or simply
+            left) or
+            - A user started a booking process but took more than 5 minutes to
+            fill all the information to get a confirmation and another user
+            started another process
+        Parameter:
+            - calendar_id
+    """
+    time_min = datetime.now(timezone.utc).isoformat()
+    time_max = (datetime.now(timezone.utc) + timedelta(days=60)).isoformat()
+
+    service = create_service()
+
+    events_result = service.events().list(
+        calendarId=calendar_id,
+        timeMin=time_min,
+        timeMax=time_max,
+        singleEvents="True",
+        orderBy="startTime"
+    ).execute()
+
+    for item in events_result['items']:
+        start_time = datetime.strptime(
+            item['created'], "%Y-%m-%dT%H:%M:%S.%f%z")
+        time_diff_delta = datetime.now(timezone.utc) - start_time
+        time_diff_mins = time_diff_delta.total_seconds() / 60
+        if 'attendees' not in item and time_diff_mins > 5:
+            cancel_event(calendar_id, item['id'], service)
 
 
 if __name__ == "__main__":
