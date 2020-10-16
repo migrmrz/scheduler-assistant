@@ -576,7 +576,7 @@ def delete_draft_events(calendar_id):
     """
         Deletes events with no email assigned in a period of 60 days and has
         been more than 5 minutes of being created. This means that:
-            - A user started a booking process, the spot was reserved but 
+            - A user started a booking process, the spot was reserved but
             ended the conversation halfway through (fallback action or simply
             left) or
             - A user started a booking process but took more than 5 minutes to
