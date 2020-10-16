@@ -69,7 +69,7 @@ def book_appt():
 def complete_booking():
     """
         Incoming autopilot task: complete_booking
-        Routes to: confirm_booking
+        Routes to: confirm_booking or book_appointments
     """
     memory = json.loads(request.form.get('Memory'))
     calendar_id = os.environ.get("GOOGLE_CALENDAR_ID")
